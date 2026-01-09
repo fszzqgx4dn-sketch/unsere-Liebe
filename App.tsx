@@ -47,29 +47,17 @@ const App: React.FC = () => {
         parsed.isPaired = false;
         parsed.myPairingCode = Math.random().toString(36).substring(2, 8).toUpperCase();
       }
-      if (!parsed.checkIns || parsed.checkIns.length === 0) {
-        // Fallback or preview check-ins if nothing exists
-        parsed.checkIns = [
-          {
-            id: 'preview-weekly-1',
-            type: CheckInType.WEEKLY,
-            question: "Reflect on this past week: What was your favorite moment together? What felt challenging? How can we support each other better next week?",
-            answers: [],
-            date: new Date().toISOString().split('T')[0],
-            periodLabel: `Week of ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
-          },
-          {
-            id: 'preview-monthly-1',
-            type: CheckInType.MONTHLY,
-            question: "Looking back at the last month: What was our biggest milestone? What are you most grateful for in our relationship right now?",
-            answers: [],
-            date: new Date().toISOString().split('T')[0],
-            periodLabel: new Date().toLocaleString(undefined, { month: 'long', year: 'numeric' })
-          }
-        ];
+      if (!parsed.checkIns) {
+        parsed.checkIns = [];
       }
       return parsed;
     }
+    
+    // Default initial state with rich preview for the new Check-in feature
+    const now = new Date();
+    const currentWeekLabel = `Week of ${now.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+    const currentMonthLabel = now.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+
     return {
       currentUser: UserRole.ME,
       isPaired: false,
@@ -79,31 +67,31 @@ const App: React.FC = () => {
       prompts: [],
       checkIns: [
         {
-          id: 'preview-weekly-1',
+          id: 'preview-weekly-active',
           type: CheckInType.WEEKLY,
-          question: "Reflect on this past week: What was your favorite moment together? What felt challenging? How can we support each other better next week?",
+          question: "How did we handle the distance this past week? Was there a moment you felt especially close despite the miles, or something we can improve for next week?",
           answers: [],
-          date: new Date().toISOString().split('T')[0],
-          periodLabel: `Week of ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+          date: now.toISOString().split('T')[0],
+          periodLabel: currentWeekLabel
         },
         {
-          id: 'preview-monthly-1',
+          id: 'preview-monthly-active',
           type: CheckInType.MONTHLY,
-          question: "Looking back at the last month: What was our biggest milestone? What are you most grateful for in our relationship right now?",
+          question: "Reflecting on this past month: What was our most significant shared milestone? What are you most grateful for in our connection right now?",
           answers: [],
-          date: new Date().toISOString().split('T')[0],
-          periodLabel: new Date().toLocaleString(undefined, { month: 'long', year: 'numeric' })
+          date: now.toISOString().split('T')[0],
+          periodLabel: currentMonthLabel
         },
         {
-          id: 'archive-weekly-sample',
+          id: 'preview-archive-weekly',
           type: CheckInType.WEEKLY,
-          question: "How did we handle the distance this past week? Was there a moment you felt especially close despite the miles?",
+          question: "Think back to our communication lately. Are we finding enough time for the deep conversations, or has life been getting in the way?",
           answers: [
-            { userId: UserRole.ME, text: "I loved our long FaceTime call on Tuesday. It felt like we were in the same room.", timestamp: Date.now() - 86400000 * 3 },
-            { userId: UserRole.PARTNER, text: "Getting your surprise text in the middle of my busy day made everything better.", timestamp: Date.now() - 86400000 * 2 }
+            { userId: UserRole.ME, text: "I think we did great! That long Friday night call really helped me feel connected again.", timestamp: Date.now() - 86400000 * 5 },
+            { userId: UserRole.PARTNER, text: "It's been a busy week for me, but hearing your voice every morning is the highlight of my day.", timestamp: Date.now() - 86400000 * 4 }
           ],
           date: new Date(Date.now() - 86400000 * 7).toISOString().split('T')[0],
-          periodLabel: `Week of ${new Date(Date.now() - 86400000 * 7).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+          periodLabel: "Last Week"
         }
       ],
       streak: 0,
