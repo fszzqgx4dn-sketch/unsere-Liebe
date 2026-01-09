@@ -10,6 +10,7 @@ interface LayoutProps {
   onSwitchUser: () => void;
   unansweredCount: number;
   checkInNotificationCount: number;
+  devMode: boolean;
 }
 
 const Layout: React.FC<LayoutProps> = ({ 
@@ -19,21 +20,24 @@ const Layout: React.FC<LayoutProps> = ({
   currentUser, 
   onSwitchUser,
   unansweredCount,
-  checkInNotificationCount
+  checkInNotificationCount,
+  devMode
 }) => {
   return (
     <div className="min-h-screen flex flex-col max-w-lg mx-auto bg-[#0a0a0a] shadow-2xl relative text-white border-x border-[#1a1a1a]">
       {/* Header */}
-      <header className="p-4 border-b border-indigo-500/10 flex justify-between items-center bg-[#0a0a0a]/90 backdrop-blur-xl sticky top-0 z-20">
+      <header className="p-4 border-b border-indigo-500/10 flex justify-between items-center bg-[#0a0a0a]/90 backdrop-blur-xl sticky top-0 z-20 h-16">
         <h1 className="text-xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 via-white to-rose-300">
           unsere Liebe
         </h1>
-        <button 
-          onClick={onSwitchUser}
-          className="text-[9px] uppercase tracking-[0.2em] px-3 py-1.5 bg-[#171717] border border-indigo-500/20 rounded-full hover:bg-white hover:text-black transition-all font-black text-gray-400 shadow-[0_0_15px_rgba(79,70,229,0.1)] active:scale-95"
-        >
-          {currentUser === UserRole.ME ? "Partner Mode" : "My Mode"}
-        </button>
+        {devMode && (
+          <button 
+            onClick={onSwitchUser}
+            className="text-[9px] uppercase tracking-[0.2em] px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-full hover:bg-white hover:text-black transition-all font-black text-indigo-400 shadow-[0_0_15px_rgba(79,70,229,0.1)] active:scale-95 animate-in fade-in zoom-in duration-300"
+          >
+            {currentUser === UserRole.ME ? "Partner Mode" : "My Mode"}
+          </button>
+        )}
       </header>
 
       {/* Main Content */}

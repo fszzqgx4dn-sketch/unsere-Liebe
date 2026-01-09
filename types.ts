@@ -83,4 +83,5 @@ export interface AppState {
   lastCompletedDate: string | null;
   pendingKissFor: UserRole | null;
   photoExchanges: PhotoExchange[];
+  devMode: boolean;
 }
