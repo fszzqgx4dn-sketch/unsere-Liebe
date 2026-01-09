@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { PromptCategory } from "../types";
 
@@ -6,7 +5,7 @@ export async function generateQuestion(category: PromptCategory, daysToVisit?: n
   const apiKey = process.env.API_KEY;
   
   if (!apiKey) {
-    console.error("Gemini API Key is missing. Please set it in your environment variables.");
+    console.error("Gemini API Key is missing. Please set it in your Vercel Environment Variables as API_KEY.");
     return "What is one small thing you're looking forward to doing with me soon?";
   }
 
