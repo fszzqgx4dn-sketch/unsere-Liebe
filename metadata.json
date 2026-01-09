@@ -1,0 +1,7 @@
+{
+  "name": "unsere Liebe",
+  "description": "A long-distance relationship companion app designed to build closeness through daily AI-powered prompts, visit countdowns, and shared reflections.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
