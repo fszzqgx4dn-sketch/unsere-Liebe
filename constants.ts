@@ -21,26 +21,28 @@ export const MORE_CATEGORIES = [
 ];
 
 export const CATEGORY_COLORS: Record<PromptCategory, string> = {
-  [PromptCategory.RELATIONSHIP]: '#6366f1', // indigo
-  [PromptCategory.MEMORIES]: '#14b8a6',     // teal
-  [PromptCategory.STORY]: '#f59e0b',        // amber
-  [PromptCategory.POEM]: '#a855f7',         // purple
-  [PromptCategory.DATE_IDEA]: '#ec4899',    // pink
-  [PromptCategory.PROXIMITY]: '#f43f5e',    // rose
-  [PromptCategory.CONTROVERSY]: '#f97316',  // orange
-  [PromptCategory.SEXY]: '#ef4444',         // red
-  [PromptCategory.FUNNY]: '#84cc16',        // lime
-  [PromptCategory.FUTURE]: '#06b6d4',       // cyan
-  [PromptCategory.MUSIC]: '#3b82f6',        // blue
-  [PromptCategory.FAMILY]: '#10b981',       // emerald
-  [PromptCategory.GROWTH]: '#fbbf24',       // yellow
-  [PromptCategory.PAST]: '#71717a',         // zinc
+  [PromptCategory.RELATIONSHIP]: '#818cf8', // vibrant indigo
+  [PromptCategory.MEMORIES]: '#2dd4bf',     // vibrant teal
+  [PromptCategory.STORY]: '#fbbf24',        // vibrant amber
+  [PromptCategory.POEM]: '#c084fc',         // vibrant purple
+  [PromptCategory.DATE_IDEA]: '#f472b6',    // vibrant pink
+  [PromptCategory.PROXIMITY]: '#fb7185',    // vibrant rose
+  [PromptCategory.CONTROVERSY]: '#fb923c',  // vibrant orange
+  [PromptCategory.SEXY]: '#f87171',         // vibrant red
+  [PromptCategory.FUNNY]: '#a3e635',        // vibrant lime
+  [PromptCategory.FUTURE]: '#22d3ee',       // vibrant cyan
+  [PromptCategory.MUSIC]: '#60a5fa',        // vibrant blue
+  [PromptCategory.FAMILY]: '#34d399',       // vibrant emerald
+  [PromptCategory.GROWTH]: '#fcd34d',       // vibrant yellow
+  [PromptCategory.PAST]: '#a1a1aa',         // vibrant zinc
 };
 
 export const COLORS = {
   background: '#0a0a0a',
-  card: '#171717',
+  card: '#121212',
   text: '#ffffff',
-  muted: '#a1a1aa',
-  border: '#262626',
+  muted: '#71717a',
+  border: '#1f1f1f',
+  accent: '#6366f1',
+  danger: '#f43f5e',
 };
