@@ -28,7 +28,7 @@ export enum CheckInType {
 }
 
 export interface Answer {
-  userId: UserRole;
+  userId: string; // Now uses the unique pairing code
   text: string;
   timestamp: number;
 }
@@ -40,6 +40,7 @@ export interface Prompt {
   answers: Answer[];
   date: string; // ISO date string
   isDaily: boolean;
+  lastUpdated: number;
 }
 
 export interface CheckIn {
@@ -47,13 +48,15 @@ export interface CheckIn {
   type: CheckInType;
   question: string;
   answers: Answer[];
-  date: string; // ISO string for the period start
-  periodLabel: string; // e.g. "Week of Oct 12" or "October 2023"
+  date: string; 
+  periodLabel: string;
+  lastUpdated: number;
 }
 
 export interface VisitInfo {
-  date: string; // ISO date string
+  date: string; 
   location: string;
+  lastUpdated: number;
 }
 
 export enum PhotoStatus {
@@ -65,14 +68,14 @@ export enum PhotoStatus {
 
 export interface PhotoExchange {
   id: string;
-  senderId: UserRole;
+  senderId: string; // Now uses the unique pairing code
   data: string; // base64
   timestamp: number;
   status: PhotoStatus;
 }
 
 export interface AppState {
-  currentUser: UserRole;
+  currentUser: UserRole; // Only used for the local UI toggle (dev mode)
   isPaired: boolean;
   myPairingCode: string;
   partnerPairingCode: string | null;
@@ -81,7 +84,7 @@ export interface AppState {
   checkIns: CheckIn[];
   streak: number;
   lastCompletedDate: string | null;
-  pendingKissFor: UserRole | null;
+  pendingKissFor: string | null; // Stores the pairing code of the recipient
   photoExchanges: PhotoExchange[];
   devMode: boolean;
 }
