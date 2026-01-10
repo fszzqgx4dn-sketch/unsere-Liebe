@@ -1,16 +1,10 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { PromptCategory } from "../types";
 
 export async function generateQuestion(category: PromptCategory, daysToVisit?: number, location?: string): Promise<string> {
-  const apiKey = process.env.API_KEY;
-  
-  if (!apiKey) {
-    console.error("Gemini API Key is missing. Please set it in your Vercel Environment Variables as API_KEY.");
-    return "What is one small thing you're looking forward to doing with me soon?";
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
-  const model = "gemini-3-flash-preview";
+  // Always use a named parameter with process.env.API_KEY directly as per guidelines
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   let context = `Generate a thoughtful, deep, or fun question for a long-distance couple in the category: ${category}.`;
   
@@ -21,8 +15,9 @@ export async function generateQuestion(category: PromptCategory, daysToVisit?: n
   }
 
   try {
+    // Calling generateContent with the model name and prompt directly
     const response = await ai.models.generateContent({
-      model,
+      model: 'gemini-3-flash-preview',
       contents: context,
       config: {
         systemInstruction: "You are a relationship counselor and romantic companion AI for a couple in a long-distance relationship. Your goal is to help them feel closer. Keep questions concise and open-ended.",
@@ -30,6 +25,7 @@ export async function generateQuestion(category: PromptCategory, daysToVisit?: n
       }
     });
 
+    // Directly access .text property from GenerateContentResponse
     return response.text || "Tell me something you love about our journey together.";
   } catch (error) {
     console.error("Error generating question:", error);

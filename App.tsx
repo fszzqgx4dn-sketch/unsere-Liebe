@@ -86,26 +86,51 @@ const App: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // --- IDENTITY HELPERS ---
+  // Identity logic
   const myCode = state.myPairingCode;
   const partnerCode = state.partnerPairingCode;
-
-  // Use this for UI role mapping
   const activeUserId = useMemo(() => {
-    return state.currentUser === UserRole.ME ? myCode : (partnerCode || 'PARTNER_TEMP');
+    return state.currentUser === UserRole.ME ? myCode : (partnerCode || 'PARTNER');
   }, [state.currentUser, myCode, partnerCode]);
 
-  // --- SYNC LOGIC ---
+  // Sync logic
   const sharedKey = useMemo(() => {
     if (!state.isPaired || !partnerCode) return null;
     return [myCode, partnerCode].sort().join('-');
   }, [state.isPaired, myCode, partnerCode]);
 
+  // Added missing toggleUser function
+  const toggleUser = useCallback(() => {
+    setState(prev => ({
+      ...prev,
+      currentUser: prev.currentUser === UserRole.ME ? UserRole.PARTNER : UserRole.ME
+    }));
+  }, []);
+
+  // Added missing viewingPrompt derived state
+  const viewingPrompt = useMemo(() => {
+    if (activeUnsavedPrompt) return activeUnsavedPrompt;
+    if (!viewingPromptId) return null;
+    return state.prompts.find(p => p.id === viewingPromptId) || null;
+  }, [state.prompts, viewingPromptId, activeUnsavedPrompt]);
+
+  // Added missing viewingCheckIn derived state
+  const viewingCheckIn = useMemo(() => {
+    if (!viewingCheckInId) return null;
+    return state.checkIns.find(c => c.id === viewingCheckInId) || null;
+  }, [state.checkIns, viewingCheckInId]);
+
+  // Added missing executeResetPairing function
+  const executeResetPairing = () => {
+    localStorage.removeItem('unsereLiebeState');
+    window.location.reload();
+  };
+
   const pushToCloud = useCallback(async (data: AppState) => {
     if (!sharedKey) return;
     setIsSyncing(true);
     try {
-      const sharedData = {
+      const payload = {
         visitInfo: data.visitInfo,
         prompts: data.prompts,
         checkIns: data.checkIns,
@@ -117,7 +142,7 @@ const App: React.FC = () => {
       };
       await fetch(`https://kvdb.io/N9H8ZpXqL6m7k2u4r5t1w0/${sharedKey}`, {
         method: 'POST',
-        body: JSON.stringify(sharedData)
+        body: JSON.stringify(payload)
       });
     } catch (e) {
       console.error("Cloud push failed", e);
@@ -131,43 +156,35 @@ const App: React.FC = () => {
     try {
       const res = await fetch(`https://kvdb.io/N9H8ZpXqL6m7k2u4r5t1w0/${sharedKey}`);
       if (!res.ok) return;
-      const cloudData = await res.json();
+      const remote = await res.json();
       
       setState(prev => {
-        // Advanced merge strategy: Keep items with newer timestamps
-        const mergeVisits = (local: VisitInfo | null, remote: VisitInfo | null) => {
-          if (!local) return remote;
-          if (!remote) return local;
-          return remote.lastUpdated > local.lastUpdated ? remote : local;
-        };
-
-        const mergeArrays = <T extends { id: string; lastUpdated?: number; timestamp?: number }>(local: T[], remote: T[]) => {
+        const mergeItem = <T extends { id: string; lastUpdated?: number; timestamp?: number }>(local: T[], remoteArr: T[]) => {
           const map = new Map<string, T>();
-          local.forEach(item => map.set(item.id, item));
-          remote.forEach(item => {
-            const existing = map.get(item.id);
-            const remoteTime = item.lastUpdated || item.timestamp || 0;
+          local.forEach(i => map.set(i.id, i));
+          remoteArr.forEach(i => {
+            const existing = map.get(i.id);
+            const remoteTime = i.lastUpdated || i.timestamp || 0;
             const localTime = existing?.lastUpdated || existing?.timestamp || 0;
             if (!existing || remoteTime > localTime) {
-              map.set(item.id, item);
+              map.set(i.id, i);
             }
           });
           return Array.from(map.values()).sort((a, b) => (b.timestamp || b.lastUpdated || 0) - (a.timestamp || a.lastUpdated || 0));
         };
 
-        const newVisit = mergeVisits(prev.visitInfo, cloudData.visitInfo);
-        const newPrompts = mergeArrays(prev.prompts, cloudData.prompts);
-        const newCheckIns = mergeArrays(prev.checkIns, cloudData.checkIns);
-        const newPhotos = mergeArrays(prev.photoExchanges, cloudData.photoExchanges);
-        
-        // Simple string comparisons for streaks/dates
-        const newStreak = Math.max(prev.streak, cloudData.streak || 0);
-        
+        const newVisit = (remote.visitInfo?.lastUpdated || 0) > (prev.visitInfo?.lastUpdated || 0) 
+          ? remote.visitInfo : prev.visitInfo;
+
+        const newPrompts = mergeItem(prev.prompts, remote.prompts || []);
+        const newCheckIns = mergeItem(prev.checkIns, remote.checkIns || []);
+        const newPhotos = mergeItem(prev.photoExchanges, remote.photoExchanges || []);
+
         const hasChanges = JSON.stringify(prev.visitInfo) !== JSON.stringify(newVisit) ||
                            JSON.stringify(prev.prompts) !== JSON.stringify(newPrompts) ||
                            JSON.stringify(prev.checkIns) !== JSON.stringify(newCheckIns) ||
                            JSON.stringify(prev.photoExchanges) !== JSON.stringify(newPhotos) ||
-                           prev.pendingKissFor !== cloudData.pendingKissFor;
+                           prev.pendingKissFor !== remote.pendingKissFor;
 
         if (!hasChanges) return prev;
 
@@ -176,10 +193,10 @@ const App: React.FC = () => {
           visitInfo: newVisit,
           prompts: newPrompts,
           checkIns: newCheckIns,
-          streak: newStreak,
-          lastCompletedDate: cloudData.lastCompletedDate || prev.lastCompletedDate,
-          pendingKissFor: cloudData.pendingKissFor,
-          photoExchanges: newPhotos
+          photoExchanges: newPhotos,
+          streak: Math.max(prev.streak, remote.streak || 0),
+          lastCompletedDate: remote.lastCompletedDate || prev.lastCompletedDate,
+          pendingKissFor: remote.pendingKissFor
         };
       });
     } catch (e) {
@@ -189,7 +206,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!sharedKey) return;
-    const interval = setInterval(pullFromCloud, 4000); // Poll every 4 seconds
+    const interval = setInterval(pullFromCloud, 4000);
     return () => clearInterval(interval);
   }, [sharedKey, pullFromCloud]);
 
@@ -197,25 +214,25 @@ const App: React.FC = () => {
     localStorage.setItem('unsereLiebeState', JSON.stringify(state));
     const timer = setTimeout(() => {
       if (state.isPaired) pushToCloud(state);
-    }, 1500);
+    }, 2000);
     return () => clearTimeout(timer);
   }, [state, pushToCloud]);
 
-  // --- AUTOMATIC GENERATION ---
+  // Logic for daily check-ins
   useEffect(() => {
     if (!state.isPaired) return;
     const now = new Date();
     const sunday = new Date(now);
     sunday.setDate(now.getDate() - now.getDay());
-    const sundayStr = sunday.toISOString().split('T')[0];
+    const sunStr = sunday.toISOString().split('T')[0];
     
-    if (!state.checkIns.find(c => c.type === CheckInType.WEEKLY && c.date === sundayStr)) {
+    if (!state.checkIns.find(c => c.type === CheckInType.WEEKLY && c.date === sunStr)) {
       const newCheckIn: CheckIn = {
-        id: `weekly-${sundayStr}`,
+        id: `weekly-${sunStr}`,
         type: CheckInType.WEEKLY,
-        question: "Reflect on this past week: What was your favorite moment together? What felt challenging? How can we support each other better next week?",
+        question: "How did we do this week? What was your favorite moment?",
         answers: [],
-        date: sundayStr,
+        date: sunStr,
         periodLabel: `Week of ${sunday.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`,
         lastUpdated: Date.now()
       };
@@ -226,37 +243,10 @@ const App: React.FC = () => {
   useEffect(() => {
     if (state.pendingKissFor === myCode) {
       setShowerEvent({ id: Date.now() });
-      const timer = setTimeout(() => setShowerEvent(null), 5000);
+      setTimeout(() => setShowerEvent(null), 5000);
       setState(prev => ({ ...prev, pendingKissFor: null }));
-      return () => clearTimeout(timer);
     }
   }, [myCode, state.pendingKissFor]);
-
-  useEffect(() => {
-    if (photoTimer !== null) {
-      if (photoTimer > 0) {
-        const t = setTimeout(() => setPhotoTimer(photoTimer - 1), 1000);
-        return () => clearTimeout(t);
-      } else {
-        const nextIdx = viewingPhotoIndex !== null ? viewingPhotoIndex + 1 : null;
-        if (nextIdx !== null && nextIdx < viewingPhotosList.length) {
-          setViewingPhotoIndex(nextIdx);
-          setPhotoTimer(10);
-        } else {
-          setViewingPhotoIndex(null);
-          setPhotoTimer(null);
-          setViewingPhotosList([]);
-        }
-      }
-    }
-  }, [photoTimer, viewingPhotoIndex, viewingPhotosList]);
-
-  const toggleUser = useCallback(() => {
-    setState(prev => ({
-      ...prev,
-      currentUser: prev.currentUser === UserRole.ME ? UserRole.PARTNER : UserRole.ME
-    }));
-  }, []);
 
   const handlePairing = () => {
     if (pairingInput.length >= 6) {
@@ -269,7 +259,7 @@ const App: React.FC = () => {
         }));
         setShowerEvent(null);
         setPairingInput('');
-      }, 2000);
+      }, 1500);
     }
   };
 
@@ -282,33 +272,12 @@ const App: React.FC = () => {
     setIsSetupOpen(false);
   };
 
-  const executeResetPairing = () => {
-    setState(prev => ({
-      ...prev,
-      isPaired: false,
-      partnerPairingCode: null,
-      visitInfo: null,
-      prompts: [],
-      checkIns: [],
-      photoExchanges: []
-    }));
-    setIsSetupOpen(false);
-    setIsConfirmingReset(false);
-  };
-
   const createDailyPrompt = async () => {
     setIsGenerating(true);
     try {
       const todayStr = new Date().toISOString().split('T')[0];
       const category = DAILY_CATEGORIES[Math.floor(Math.random() * DAILY_CATEGORIES.length)];
-      let daysToVisit = undefined;
-      let location = undefined;
-      if (state.visitInfo) {
-        const diff = new Date(state.visitInfo.date).getTime() - new Date().getTime();
-        daysToVisit = Math.ceil(diff / (1000 * 60 * 60 * 24));
-        location = state.visitInfo.location;
-      }
-      const question = await generateQuestion(category, daysToVisit, location);
+      const question = await generateQuestion(category);
       const newPrompt: Prompt = {
         id: Math.random().toString(36).substr(2, 9),
         category,
@@ -324,11 +293,60 @@ const App: React.FC = () => {
     }
   };
 
-  const sendKuss = () => {
-    if (!partnerCode) return;
-    setShowerEvent({ id: Date.now() });
-    setTimeout(() => setShowerEvent(null), 5000);
-    setState(prev => ({ ...prev, pendingKissFor: partnerCode }));
+  const createExtraPrompt = async (category: PromptCategory) => {
+    setIsGenerating(true);
+    try {
+      const question = await generateQuestion(category);
+      const newPrompt: Prompt = {
+        id: Math.random().toString(36).substr(2, 9),
+        category,
+        question,
+        answers: [],
+        date: new Date().toISOString(),
+        isDaily: false,
+        lastUpdated: Date.now()
+      };
+      setActiveUnsavedPrompt(newPrompt);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const submitAnswer = () => {
+    if ((!activeUnsavedPrompt && !viewingPromptId && !viewingCheckInId) || !currentAnswer.trim()) return;
+    const timestamp = Date.now();
+    
+    setState(prev => {
+      if (viewingCheckInId) {
+        return {
+          ...prev,
+          checkIns: prev.checkIns.map(c => c.id === viewingCheckInId ? {
+            ...c, lastUpdated: timestamp, answers: [...c.answers.filter(a => a.userId !== activeUserId), { userId: activeUserId, text: currentAnswer, timestamp }]
+          } : c)
+        };
+      }
+
+      const targetId = activeUnsavedPrompt ? activeUnsavedPrompt.id : viewingPromptId;
+      const target = prev.prompts.find(p => p.id === targetId) || activeUnsavedPrompt;
+      if (!target) return prev;
+
+      const updated = {
+        ...target, lastUpdated: timestamp,
+        answers: [...target.answers.filter(a => a.userId !== activeUserId), { userId: activeUserId, text: currentAnswer, timestamp }]
+      };
+
+      return {
+        ...prev,
+        prompts: prev.prompts.some(p => p.id === targetId) 
+          ? prev.prompts.map(p => p.id === targetId ? updated : p)
+          : [updated, ...prev.prompts]
+      };
+    });
+
+    setCurrentAnswer('');
+    setActiveUnsavedPrompt(null);
+    setViewingPromptId(null);
+    setViewingCheckInId(null);
   };
 
   const startCamera = async () => {
@@ -337,20 +355,15 @@ const App: React.FC = () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
       if (videoRef.current) videoRef.current.srcObject = stream;
-    } catch (err) {
-      console.error(err);
-      setIsCameraOpen(false);
-    }
+    } catch (err) { console.error(err); setIsCameraOpen(false); }
   };
 
   const takePhoto = () => {
     if (videoRef.current && canvasRef.current) {
       const context = canvasRef.current.getContext('2d');
       if (context) {
-        const maxWidth = 600;
-        const scale = maxWidth / videoRef.current.videoWidth;
-        canvasRef.current.width = maxWidth;
-        canvasRef.current.height = videoRef.current.videoHeight * scale;
+        canvasRef.current.width = 600;
+        canvasRef.current.height = videoRef.current.videoHeight * (600 / videoRef.current.videoWidth);
         context.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
         setCapturedPhoto(canvasRef.current.toDataURL('image/jpeg', 0.5));
         if (videoRef.current.srcObject) (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
@@ -367,10 +380,7 @@ const App: React.FC = () => {
       timestamp: Date.now(),
       status: PhotoStatus.DELIVERED
     };
-    setState(prev => ({
-      ...prev,
-      photoExchanges: [newEx, ...prev.photoExchanges]
-    }));
+    setState(prev => ({ ...prev, photoExchanges: [newEx, ...prev.photoExchanges] }));
     setCapturedPhoto(null);
     setIsCameraOpen(false);
   };
@@ -390,66 +400,8 @@ const App: React.FC = () => {
     }
   };
 
-  const submitAnswer = () => {
-    if ((!activeUnsavedPrompt && !viewingPromptId && !viewingCheckInId) || !currentAnswer.trim()) return;
-    
-    setState(prev => {
-      const timestamp = Date.now();
-      if (viewingCheckInId) {
-        const newCheckIns = prev.checkIns.map(c => {
-          if (c.id === viewingCheckInId) {
-            const answers = [...c.answers.filter(a => a.userId !== activeUserId), { userId: activeUserId, text: currentAnswer, timestamp }];
-            return { ...c, answers, lastUpdated: timestamp };
-          }
-          return c;
-        });
-        return { ...prev, checkIns: newCheckIns };
-      }
-
-      const targetId = activeUnsavedPrompt ? activeUnsavedPrompt.id : viewingPromptId;
-      let targetPrompt = prev.prompts.find(p => p.id === targetId) || activeUnsavedPrompt;
-      if (!targetPrompt) return prev;
-
-      const newAnswers = [...targetPrompt.answers.filter(a => a.userId !== activeUserId), { userId: activeUserId, text: currentAnswer, timestamp }];
-      const updatedPrompt = { ...targetPrompt, answers: newAnswers, lastUpdated: timestamp };
-      
-      const newPrompts = prev.prompts.some(p => p.id === targetId) 
-        ? prev.prompts.map(p => p.id === targetId ? updatedPrompt : p)
-        : [updatedPrompt, ...prev.prompts];
-
-      return { ...prev, prompts: newPrompts };
-    });
-    
-    setCurrentAnswer(''); 
-    setActiveUnsavedPrompt(null); 
-    setViewingPromptId(null);
-    setViewingCheckInId(null);
-  };
-
-  const todayStr = new Date().toISOString().split('T')[0];
-  const recentMoments = state.prompts.filter(p => p.answers.length > 0 && p.date === todayStr);
-  const viewingPrompt = state.prompts.find(p => p.id === viewingPromptId) || activeUnsavedPrompt;
-  const viewingCheckIn = state.checkIns.find(c => c.id === viewingCheckInId);
-  
-  const hasUserAnsweredViewing = useMemo(() => {
-    if (viewingCheckIn) return viewingCheckIn.answers.some(a => a.userId === activeUserId);
-    if (viewingPrompt) return viewingPrompt.answers.some(a => a.userId === activeUserId);
-    return false;
-  }, [viewingPrompt, viewingCheckIn, activeUserId]);
-
-  const unansweredCount = useMemo(() => {
-    return state.prompts.filter(p => {
-      const partnerAnswered = p.answers.some(a => a.userId !== activeUserId);
-      const meAnswered = p.answers.some(a => a.userId === activeUserId);
-      return partnerAnswered && !meAnswered;
-    }).length;
-  }, [state.prompts, activeUserId]);
-
   const unreadPhotosCount = state.photoExchanges.filter(ex => ex.senderId !== activeUserId && ex.status === PhotoStatus.DELIVERED).length;
-
-  const absoluteLastPhoto = useMemo(() => {
-    return state.photoExchanges[0] || null;
-  }, [state.photoExchanges]);
+  const absoluteLastPhoto = state.photoExchanges[0] || null;
 
   const renderSnapStatus = () => {
     if (!absoluteLastPhoto || unreadPhotosCount > 0) return null;
@@ -487,41 +439,38 @@ const App: React.FC = () => {
       <Layout 
         activeTab={activeTab} setActiveTab={setActiveTab} 
         currentUser={state.currentUser} onSwitchUser={toggleUser}
-        unansweredCount={unansweredCount}
-        checkInNotificationCount={0}
+        unansweredCount={state.prompts.filter(p => p.answers.some(a => a.userId !== activeUserId) && !p.answers.some(a => a.userId === activeUserId)).length}
+        checkInNotificationCount={state.checkIns.filter(c => !c.answers.some(a => a.userId === activeUserId)).length}
         devMode={state.devMode}
         isSyncing={isSyncing}
       >
         {(viewingPrompt || viewingCheckIn) && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <div className="bg-[#171717] w-full max-sm rounded-[2rem] p-6 border border-[#262626] shadow-2xl animate-in slide-in-from-bottom-6">
               <div className="flex justify-between items-center mb-6">
-                <span className="text-[8px] uppercase font-black px-3 py-1.5 rounded-lg border border-[#262626] bg-[#0a0a0a]">Prompt</span>
+                <span className="text-[8px] uppercase font-black px-3 py-1.5 rounded-lg border border-[#262626] bg-[#0a0a0a]">Moment</span>
                 <button onClick={() => { setActiveUnsavedPrompt(null); setViewingPromptId(null); setViewingCheckInId(null); }} className="text-gray-500 hover:text-white"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg></button>
               </div>
               <h2 className="text-xl font-bold text-white mb-6 leading-snug">{viewingCheckIn?.question || viewingPrompt?.question}</h2>
-              <div className="space-y-4 max-h-[60vh] overflow-y-auto">
-                {(viewingCheckIn?.answers || viewingPrompt?.answers || []).map(a => (
-                  <div key={a.userId} className={`p-4 rounded-xl border border-[#262626] ${a.userId === activeUserId ? 'bg-[#0a0a0a]' : 'bg-[#111]'} border-l-4`} style={{ borderLeftColor: a.userId === activeUserId ? '#6366f1' : '#ec4899' }}>
-                    <p className="text-[8px] uppercase font-black text-gray-600 mb-2">{a.userId === activeUserId ? 'You' : 'Partner'}</p>
-                    { (a.userId === activeUserId || hasUserAnsweredViewing) ? <p className="text-xs text-gray-300 italic">"{a.text}"</p> : <div className="h-2 w-full bg-gray-800 rounded animate-pulse" /> }
-                  </div>
-                ))}
-                {!hasUserAnsweredViewing && (
+              <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-1">
+                {(viewingCheckIn?.answers || viewingPrompt?.answers || []).map(a => {
+                  const isMe = a.userId === activeUserId;
+                  const canSee = isMe || (viewingCheckIn || viewingPrompt)?.answers.some(ans => ans.userId === activeUserId);
+                  return (
+                    <div key={a.userId} className={`p-4 rounded-xl border border-[#262626] ${isMe ? 'bg-[#0a0a0a]' : 'bg-[#111]'} border-l-4`} style={{ borderLeftColor: isMe ? '#6366f1' : '#ec4899' }}>
+                      <p className="text-[8px] uppercase font-black text-gray-600 mb-2">{isMe ? 'You' : 'Partner'}</p>
+                      {canSee ? <p className="text-xs text-gray-300 italic">"{a.text}"</p> : <div className="h-2 w-full bg-gray-800 rounded animate-pulse" />}
+                    </div>
+                  );
+                })}
+                {!(viewingCheckIn || viewingPrompt)?.answers.some(a => a.userId === activeUserId) && (
                   <div className="space-y-4">
-                    <textarea value={currentAnswer} onChange={(e) => setCurrentAnswer(e.target.value)} placeholder="Share your thoughts..." className="w-full h-32 p-5 bg-[#0a0a0a] rounded-xl border border-[#262626] text-white text-xs outline-none" />
-                    <button onClick={submitAnswer} className="w-full bg-white text-black py-3 rounded-xl font-black text-[9px] uppercase tracking-widest">Share Reflection</button>
+                    <textarea value={currentAnswer} onChange={(e) => setCurrentAnswer(e.target.value)} placeholder="Pour your heart out..." className="w-full h-24 p-4 bg-[#0a0a0a] rounded-xl border border-[#262626] text-white text-xs outline-none focus:border-indigo-500/50" />
+                    <button onClick={submitAnswer} className="w-full bg-white text-black py-3 rounded-xl font-black text-[9px] uppercase tracking-widest">Post Answer</button>
                   </div>
                 )}
               </div>
             </div>
-          </div>
-        )}
-
-        {viewingPhotoIndex !== null && viewingPhotosList[viewingPhotoIndex] && (
-          <div onClick={() => setViewingPhotoIndex(null)} className="fixed inset-0 z-[110] bg-black flex flex-col items-center justify-center cursor-pointer">
-            <img src={viewingPhotosList[viewingPhotoIndex].data} className="max-w-full max-h-full object-contain" />
-            <div className="absolute top-10 right-10 text-white font-black text-2xl bg-black/40 w-12 h-12 rounded-full flex items-center justify-center">{photoTimer}</div>
           </div>
         )}
 
@@ -530,7 +479,7 @@ const App: React.FC = () => {
             <div className="space-y-4">
               <Countdown visitInfo={state.visitInfo} onUpdate={() => setIsSetupOpen(true)} />
               <div className="flex gap-3 h-28">
-                <div onClick={sendKuss} className="flex-1 p-6 bg-[#171717] rounded-2xl border border-[#262626] flex flex-col items-center justify-center cursor-pointer hover:bg-[#1f1f1f]">
+                <div onClick={() => { if(partnerCode) { setShowerEvent({id: Date.now()}); setState(prev => ({...prev, pendingKissFor: partnerCode})); } }} className="flex-1 p-6 bg-[#171717] rounded-2xl border border-[#262626] flex flex-col items-center justify-center cursor-pointer hover:bg-[#1f1f1f]">
                   <span className="text-2xl">💋</span>
                   <h4 className="text-[8px] font-black text-white uppercase tracking-widest mt-2">Send Kuss</h4>
                 </div>
@@ -546,22 +495,21 @@ const App: React.FC = () => {
                   )}
                 </div>
               </div>
-              {!viewingPrompt && (
+              {!activeUnsavedPrompt && (
                 <div className="text-center p-6 bg-[#171717] rounded-[2rem] border border-[#262626]">
-                  <h3 className="text-lg font-black text-white mb-2">Daily Reflection</h3>
-                  <p className="text-[8px] text-gray-500 mb-6 uppercase tracking-widest">Connect deeply through a shared moment.</p>
-                  <button onClick={createDailyPrompt} className="w-full bg-white text-black py-3 rounded-xl font-black text-[9px] uppercase tracking-widest">{isGenerating ? '...' : 'Generate Prompt'}</button>
+                  <h3 className="text-lg font-black text-white mb-2">Daily Story</h3>
+                  <button onClick={createDailyPrompt} className="w-full bg-white text-black py-3 rounded-xl font-black text-[9px] uppercase tracking-widest">{isGenerating ? '...' : 'New Prompt'}</button>
                 </div>
               )}
               <div className="space-y-3">
-                {recentMoments.map(p => (
-                  <div key={p.id} onClick={() => setViewingPromptId(p.id)} className="flex items-center justify-between p-5 bg-[#171717] rounded-[1.5rem] border border-[#262626] cursor-pointer">
+                {state.prompts.filter(p => p.date === new Date().toISOString().split('T')[0]).map(p => (
+                  <div key={p.id} onClick={() => setViewingPromptId(p.id)} className="flex items-center justify-between p-5 bg-[#171717] rounded-2xl border border-[#262626] cursor-pointer hover:bg-[#1f1f1f]">
                     <div className="flex-1 mr-4">
                       <p className="text-[7px] font-black uppercase mb-1" style={{ color: CATEGORY_COLORS[p.category] }}>{p.category}</p>
                       <p className="text-xs font-black text-gray-300 line-clamp-1">{p.question}</p>
                     </div>
                     <div className="flex -space-x-2">
-                      {p.answers.map(a => <div key={a.userId} className={`w-6 h-6 rounded-full border-2 border-[#171717] flex items-center justify-center text-[8px] font-black ${a.userId === myCode ? 'bg-indigo-600' : 'bg-rose-600'}`}>{a.userId === myCode ? 'Y' : 'P'}</div>)}
+                      {p.answers.map(a => <div key={a.userId} className={`w-6 h-6 rounded-full border-2 border-[#171717] flex items-center justify-center text-[8px] font-black ${a.userId === myCode ? 'bg-indigo-600' : 'bg-rose-600'}`}>{a.userId === myCode ? 'M' : 'P'}</div>)}
                     </div>
                   </div>
                 ))}
@@ -571,48 +519,94 @@ const App: React.FC = () => {
 
           {activeTab === 'responses' && (
             <div className="space-y-4 px-2">
-              <h2 className="text-xl font-black tracking-tighter text-white">Archive</h2>
-              {state.prompts.filter(p => p.answers.length > 0).map(prompt => (
-                <div key={prompt.id} onClick={() => setViewingPromptId(prompt.id)} className="bg-[#171717] rounded-[1.5rem] p-5 border border-[#262626] mb-3">
-                  <div className="flex justify-between mb-4"><span className="text-[7px] uppercase font-black" style={{ color: CATEGORY_COLORS[prompt.category] }}>{prompt.category}</span></div>
-                  <h3 className="text-sm font-black text-white leading-tight">{prompt.question}</h3>
+              <h2 className="text-xl font-black tracking-tighter text-white">Shared Archive</h2>
+              {state.prompts.filter(p => p.answers.length > 0).map(p => (
+                <div key={p.id} onClick={() => setViewingPromptId(p.id)} className="bg-[#171717] rounded-2xl p-5 border border-[#262626] cursor-pointer hover:bg-[#1f1f1f] transition-all">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-[7px] uppercase font-black" style={{ color: CATEGORY_COLORS[p.category] }}>{p.category}</span>
+                    <span className="text-[7px] text-gray-600 uppercase font-black">{new Date(p.date).toLocaleDateString()}</span>
+                  </div>
+                  <h3 className="text-sm font-black text-white leading-tight">{p.question}</h3>
                 </div>
               ))}
+              {state.prompts.filter(p => p.answers.length > 0).length === 0 && (
+                <div className="py-20 text-center opacity-30"><p className="text-[10px] uppercase font-black tracking-widest">No shared moments yet</p></div>
+              )}
             </div>
           )}
 
-          {/* ... Other tabs follow similar identification mapping ... */}
+          {activeTab === 'checkins' && (
+            <div className="space-y-4 px-2">
+              <h2 className="text-xl font-black tracking-tighter text-white">Our Journey</h2>
+              <div className="space-y-3">
+                {state.checkIns.map(c => {
+                  const answered = c.answers.some(a => a.userId === activeUserId);
+                  return (
+                    <div key={c.id} onClick={() => setViewingCheckInId(c.id)} className={`p-6 rounded-2xl border transition-all cursor-pointer ${answered ? 'bg-[#171717] border-[#262626]' : 'bg-amber-900/10 border-amber-500/30'}`}>
+                      <div className="flex justify-between mb-2">
+                        <span className="text-[7px] uppercase font-black text-amber-400">{c.type}</span>
+                        <span className="text-[7px] text-gray-600 uppercase font-black">{c.periodLabel}</span>
+                      </div>
+                      <h4 className="text-sm font-black text-white">{c.question}</h4>
+                      {!answered && <button className="w-full bg-amber-500 text-black py-2 rounded-lg font-black text-[8px] uppercase tracking-widest mt-4">Check-in Now</button>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'more' && (
+            <div className="px-2 space-y-8">
+              <h2 className="text-xl font-black tracking-tighter text-white">Explore</h2>
+              <div className="grid grid-cols-2 gap-4">
+                {MORE_CATEGORIES.map(category => (
+                  <button key={category} onClick={() => createExtraPrompt(category)} className="bg-[#171717] p-6 rounded-[2rem] border border-[#262626] text-left hover:bg-[#1f1f1f] active:scale-95 transition-all">
+                    <p className="text-[10px] font-black uppercase tracking-tight" style={{ color: CATEGORY_COLORS[category] }}>{category}</p>
+                    <p className="text-[8px] text-gray-600 uppercase mt-1 font-black">AI Insight</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {isSetupOpen && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl">
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl">
             <div className="bg-[#171717] w-full max-sm rounded-[2.5rem] p-8 border border-[#262626] flex flex-col">
-              <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-black text-white">Settings</h2><button onClick={() => setIsSetupOpen(false)} className="text-gray-500"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg></button></div>
+              <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-black text-white">Reunion</h2><button onClick={() => setIsSetupOpen(false)} className="text-gray-500"><svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg></button></div>
               <div className="space-y-6">
-                <div><label className="text-[8px] font-black text-gray-500 uppercase">Location</label><input value={setupLocation} onChange={(e) => setSetupLocation(e.target.value)} className="w-full bg-[#0a0a0a] p-4 rounded-xl border border-[#262626] text-white mt-2" /></div>
-                <div><label className="text-[8px] font-black text-gray-500 uppercase">Date</label><input type="date" onChange={(e) => setSelectedDate(e.target.value)} className="w-full bg-[#0a0a0a] p-4 rounded-xl border border-[#262626] text-white mt-2" /></div>
-                <button onClick={handleUpdateVisit} className="w-full bg-white text-black py-4 rounded-xl font-black uppercase text-[9px] tracking-widest">Save Reunion</button>
-                <div className="pt-6 border-t border-[#262626]"><button onClick={() => setIsConfirmingReset(true)} className="w-full bg-rose-500/10 text-rose-400 py-3 rounded-xl border border-rose-500/20 font-black uppercase text-[8px]">Reset Pairing</button></div>
-                {isConfirmingReset && <button onClick={executeResetPairing} className="w-full bg-rose-600 text-white py-3 rounded-xl font-black uppercase text-[8px]">Confirm Reset</button>}
+                <div><label className="text-[8px] font-black text-gray-500 uppercase">Meet-up Location</label><input value={setupLocation} onChange={(e) => setSetupLocation(e.target.value)} className="w-full bg-[#0a0a0a] p-4 rounded-xl border border-[#262626] text-white mt-2" /></div>
+                <div><label className="text-[8px] font-black text-gray-500 uppercase">Meet-up Date</label><input type="date" value={selectedDate || ''} onChange={(e) => setSelectedDate(e.target.value)} className="w-full bg-[#0a0a0a] p-4 rounded-xl border border-[#262626] text-white mt-2" /></div>
+                <button onClick={handleUpdateVisit} className="w-full bg-white text-black py-4 rounded-xl font-black uppercase text-[9px] tracking-widest">Save Settings</button>
+                <div className="pt-6 border-t border-[#262626]"><button onClick={() => setIsConfirmingReset(true)} className="w-full bg-rose-500/10 text-rose-400 py-3 rounded-xl border border-rose-500/20 font-black uppercase text-[8px]">Reset Device</button></div>
+                {isConfirmingReset && <button onClick={executeResetPairing} className="w-full bg-rose-600 text-white py-3 rounded-xl font-black uppercase text-[8px] animate-pulse">Confirm Disconnect</button>}
               </div>
             </div>
           </div>
         )}
 
         {isCameraOpen && (
-          <div className="fixed inset-0 z-[130] bg-black flex flex-col">
-            <div className="flex-1 relative flex items-center justify-center">
+          <div className="fixed inset-0 z-[200] bg-black flex flex-col">
+            <div className="flex-1 relative flex items-center justify-center overflow-hidden">
               {capturedPhoto ? <img src={capturedPhoto} className="w-full h-full object-cover" /> : <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />}
               <canvas ref={canvasRef} className="hidden" />
             </div>
-            <div className="p-8 flex justify-center space-x-4 bg-black">
+            <div className="p-8 flex justify-center space-x-6 bg-black pb-12">
               {capturedPhoto ? (
-                <><button onClick={() => { setCapturedPhoto(null); startCamera(); }} className="bg-white/10 text-white px-6 py-3 rounded-full font-black text-[9px] uppercase">Retake</button><button onClick={sendCapturedPhoto} className="bg-indigo-600 text-white px-6 py-3 rounded-full font-black text-[9px] uppercase">Send</button></>
+                <><button onClick={() => { setCapturedPhoto(null); startCamera(); }} className="bg-white/10 text-white px-8 py-3 rounded-full font-black text-[10px] uppercase">Retake</button><button onClick={sendCapturedPhoto} className="bg-indigo-600 text-white px-8 py-3 rounded-full font-black text-[10px] uppercase">Send Snap</button></>
               ) : (
-                <button onClick={takePhoto} className="w-20 h-20 rounded-full border-4 border-white" />
+                <button onClick={takePhoto} className="w-20 h-20 rounded-full border-4 border-white shadow-[0_0_20px_rgba(255,255,255,0.3)]" />
               )}
-              <button onClick={() => { setIsCameraOpen(false); if(videoRef.current?.srcObject) (videoRef.current.srcObject as MediaStream).getTracks().forEach(t=>t.stop()); }} className="text-white text-[9px] uppercase font-black">Cancel</button>
+              <button onClick={() => { setIsCameraOpen(false); if(videoRef.current?.srcObject) (videoRef.current.srcObject as MediaStream).getTracks().forEach(t=>t.stop()); }} className="text-gray-500 text-[9px] uppercase font-black">Cancel</button>
             </div>
+          </div>
+        )}
+
+        {viewingPhotoIndex !== null && viewingPhotosList[viewingPhotoIndex] && (
+          <div onClick={() => { if(viewingPhotoIndex < viewingPhotosList.length - 1) setViewingPhotoIndex(viewingPhotoIndex + 1); else setViewingPhotoIndex(null); }} className="fixed inset-0 z-[210] bg-black flex flex-col items-center justify-center cursor-pointer">
+            <img src={viewingPhotosList[viewingPhotoIndex].data} className="max-w-full max-h-full object-contain" />
+            <div className="absolute top-10 right-10 text-white font-black text-2xl bg-black/40 w-12 h-12 rounded-full flex items-center justify-center">{photoTimer}</div>
           </div>
         )}
       </Layout>
