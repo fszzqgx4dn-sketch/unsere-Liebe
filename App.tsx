@@ -6,7 +6,7 @@ import Countdown from './components/Countdown';
 import { generateQuestion } from './services/geminiService';
 import { DAILY_CATEGORIES, MORE_CATEGORIES, CATEGORY_COLORS } from './constants';
 
-// Stable Emoji Shower component to prevent random regeneration on every parent render
+// Stable Emoji Shower component
 const EmojiShower = React.memo(({ eventId }: { eventId: number }) => {
   const particles = useMemo(() => {
     return Array.from({ length: 40 }).map((_, i) => ({
@@ -65,6 +65,7 @@ const App: React.FC = () => {
   const [currentAnswer, setCurrentAnswer] = useState('');
   const [pairingInput, setPairingInput] = useState('');
   const [isConfirmingReset, setIsConfirmingReset] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   
   const [calDate, setCalDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(state.visitInfo?.date || null);
@@ -86,9 +87,91 @@ const App: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // --- SYNC LOGIC ---
+  const sharedKey = useMemo(() => {
+    if (!state.isPaired || !state.partnerPairingCode) return null;
+    return [state.myPairingCode, state.partnerPairingCode].sort().join('-');
+  }, [state.isPaired, state.myPairingCode, state.partnerPairingCode]);
+
+  // Push local changes to cloud
+  const pushToCloud = useCallback(async (data: AppState) => {
+    if (!sharedKey) return;
+    setIsSyncing(true);
+    try {
+      // We only sync the shared parts of the state
+      const sharedData = {
+        visitInfo: data.visitInfo,
+        prompts: data.prompts,
+        checkIns: data.checkIns,
+        streak: data.streak,
+        lastCompletedDate: data.lastCompletedDate,
+        pendingKissFor: data.pendingKissFor,
+        photoExchanges: data.photoExchanges,
+        lastUpdate: Date.now()
+      };
+      await fetch(`https://kvdb.io/N9H8ZpXqL6m7k2u4r5t1w0/${sharedKey}`, {
+        method: 'POST',
+        body: JSON.stringify(sharedData)
+      });
+    } catch (e) {
+      console.error("Cloud push failed", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [sharedKey]);
+
+  // Pull changes from cloud
+  const pullFromCloud = useCallback(async () => {
+    if (!sharedKey) return;
+    try {
+      const res = await fetch(`https://kvdb.io/N9H8ZpXqL6m7k2u4r5t1w0/${sharedKey}`);
+      if (!res.ok) return;
+      const cloudData = await res.json();
+      
+      setState(prev => {
+        // Only update if cloud data is newer or has different contents
+        // This is a simple merge strategy
+        const hasChanges = JSON.stringify(prev.visitInfo) !== JSON.stringify(cloudData.visitInfo) ||
+                           JSON.stringify(prev.prompts) !== JSON.stringify(cloudData.prompts) ||
+                           JSON.stringify(prev.checkIns) !== JSON.stringify(cloudData.checkIns) ||
+                           JSON.stringify(prev.photoExchanges) !== JSON.stringify(cloudData.photoExchanges) ||
+                           prev.pendingKissFor !== cloudData.pendingKissFor;
+
+        if (!hasChanges) return prev;
+
+        return {
+          ...prev,
+          visitInfo: cloudData.visitInfo,
+          prompts: cloudData.prompts,
+          checkIns: cloudData.checkIns,
+          streak: cloudData.streak,
+          lastCompletedDate: cloudData.lastCompletedDate,
+          pendingKissFor: cloudData.pendingKissFor,
+          photoExchanges: cloudData.photoExchanges
+        };
+      });
+    } catch (e) {
+      console.error("Cloud pull failed", e);
+    }
+  }, [sharedKey]);
+
+  // Auto-sync polling
+  useEffect(() => {
+    if (!sharedKey) return;
+    const interval = setInterval(pullFromCloud, 5000);
+    return () => clearInterval(interval);
+  }, [sharedKey, pullFromCloud]);
+
+  // Trigger push on local state changes
   useEffect(() => {
     localStorage.setItem('unsereLiebeState', JSON.stringify(state));
-  }, [state]);
+    // Avoid infinite loop by only pushing if we aren't currently pulling
+    // In a real app we'd use a versioning system
+    const timer = setTimeout(() => {
+        if (state.isPaired) pushToCloud(state);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [state, pushToCloud]);
 
   // Reset confirmation state when modal closes
   useEffect(() => {
@@ -303,10 +386,13 @@ const App: React.FC = () => {
     if (videoRef.current && canvasRef.current) {
       const context = canvasRef.current.getContext('2d');
       if (context) {
-        canvasRef.current.width = videoRef.current.videoWidth;
-        canvasRef.current.height = videoRef.current.videoHeight;
-        context.drawImage(videoRef.current, 0, 0);
-        const data = canvasRef.current.toDataURL('image/png');
+        // Compress for cloud transmission
+        const maxWidth = 800;
+        const scale = maxWidth / videoRef.current.videoWidth;
+        canvasRef.current.width = maxWidth;
+        canvasRef.current.height = videoRef.current.videoHeight * scale;
+        context.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
+        const data = canvasRef.current.toDataURL('image/jpeg', 0.6); // Jpeg for better compression
         setCapturedPhoto(data);
         stopCamera();
       }
@@ -429,7 +515,6 @@ const App: React.FC = () => {
   const viewingPrompt = state.prompts.find(p => p.id === viewingPromptId) || activeUnsavedPrompt;
   const viewingCheckIn = state.checkIns.find(c => c.id === viewingCheckInId);
   
-  // Logic to determine if current user has answered the viewing item
   const hasUserAnsweredViewing = useMemo(() => {
     if (viewingCheckIn) return viewingCheckIn.answers.some(a => a.userId === state.currentUser);
     if (viewingPrompt) return viewingPrompt.answers.some(a => a.userId === state.currentUser);
@@ -466,18 +551,14 @@ const App: React.FC = () => {
 
   const unreadPhotosCount = state.photoExchanges.filter(ex => ex.senderId !== state.currentUser && ex.status === PhotoStatus.DELIVERED).length;
 
-  // Track the absolute most recent photo to show status
   const absoluteLastPhoto = useMemo(() => {
     if (state.photoExchanges.length === 0) return null;
     return state.photoExchanges[state.photoExchanges.length - 1];
   }, [state.photoExchanges]);
 
-  // UI Helper for Snapchat Status according to user logic:
-  // Me sent -> Delivered (Solid ➤) / Seen (Empty ▻)
-  // Partner sent -> Received (Solid ■) / Opened (Empty □)
   const renderSnapStatus = () => {
     if (!absoluteLastPhoto) return null;
-    if (unreadPhotosCount > 0) return null; // Already handled by "X Received" text
+    if (unreadPhotosCount > 0) return null;
 
     const isMe = absoluteLastPhoto.senderId === state.currentUser;
     const status = absoluteLastPhoto.status;
@@ -499,7 +580,6 @@ const App: React.FC = () => {
         );
       }
     } else {
-      // It's from partner, and unreadPhotosCount is 0, so it must have been opened by me
       return (
         <div className="flex flex-col items-center">
           <span className="text-rose-400 text-sm">□</span>
@@ -557,6 +637,7 @@ const App: React.FC = () => {
         unansweredCount={unansweredCount}
         checkInNotificationCount={checkInNotificationCount}
         devMode={state.devMode}
+        isSyncing={isSyncing}
       >
         {(viewingPrompt || viewingCheckIn) && (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
@@ -582,7 +663,6 @@ const App: React.FC = () => {
               <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
                 {(viewingCheckIn ? viewingCheckIn.answers : (viewingPrompt as Prompt).answers).map(a => {
                   const isOwnAnswer = a.userId === state.currentUser;
-                  // Blind mode: Only reveal partner's answer if user has already shared theirs.
                   const shouldReveal = isOwnAnswer || hasUserAnsweredViewing;
 
                   return (
@@ -845,7 +925,6 @@ const App: React.FC = () => {
               </div>
 
               <div className="space-y-8 flex-1 overflow-y-auto pr-1">
-                {/* Reunion Details */}
                 <section className="space-y-4">
                   <h3 className="text-[8px] font-black uppercase tracking-[0.4em] text-indigo-400 border-b border-indigo-500/10 pb-2">Reunion Details</h3>
                   <div>
@@ -874,7 +953,6 @@ const App: React.FC = () => {
                   <button onClick={handleUpdateVisit} className="w-full bg-white text-black py-4 rounded-xl font-black uppercase text-[9px] tracking-[0.2em] shadow-lg active:scale-95 transition-all">Save Reunion Info</button>
                 </section>
                 
-                {/* Connection Section */}
                 <section className="space-y-4">
                   <h3 className="text-[8px] font-black uppercase tracking-[0.4em] text-rose-400 border-b border-rose-500/10 pb-2">Connection</h3>
                   <div className="bg-[#0a0a0a] p-5 rounded-2xl border border-[#262626]">
@@ -916,7 +994,6 @@ const App: React.FC = () => {
                   </div>
                 </section>
 
-                {/* App Settings */}
                 <section className="space-y-4 pb-8">
                   <h3 className="text-[8px] font-black uppercase tracking-[0.4em] text-amber-400 border-b border-amber-500/10 pb-2">App Settings</h3>
                   <div className="flex items-center justify-between p-4 bg-[#0a0a0a] rounded-2xl border border-[#262626]">

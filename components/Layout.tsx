@@ -11,6 +11,7 @@ interface LayoutProps {
   unansweredCount: number;
   checkInNotificationCount: number;
   devMode: boolean;
+  isSyncing?: boolean;
 }
 
 const Layout: React.FC<LayoutProps> = ({ 
@@ -21,15 +22,19 @@ const Layout: React.FC<LayoutProps> = ({
   onSwitchUser,
   unansweredCount,
   checkInNotificationCount,
-  devMode
+  devMode,
+  isSyncing
 }) => {
   return (
     <div className="min-h-screen flex flex-col max-w-lg mx-auto bg-[#0a0a0a] shadow-2xl relative text-white border-x border-[#1a1a1a]">
       {/* Header */}
       <header className="p-4 border-b border-indigo-500/10 flex justify-between items-center bg-[#0a0a0a]/90 backdrop-blur-xl sticky top-0 z-20 h-16">
-        <h1 className="text-xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 via-white to-rose-300">
-          unsere Liebe
-        </h1>
+        <div className="flex items-center space-x-2">
+          <h1 className={`text-xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 via-white to-rose-300 transition-all duration-500 ${isSyncing ? 'drop-shadow-[0_0_10px_rgba(129,140,248,0.5)]' : ''}`}>
+            unsere Liebe
+          </h1>
+          {isSyncing && <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_#10b981]" />}
+        </div>
         {devMode && (
           <button 
             onClick={onSwitchUser}
