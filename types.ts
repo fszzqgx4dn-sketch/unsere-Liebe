@@ -84,7 +84,7 @@ export interface AppState {
   checkIns: CheckIn[];
   streak: number;
   lastCompletedDate: string | null;
-  lastKissTimestamp: number; // Synchronized timestamp of the last kiss sent
+  lastKissTimestamp: number;
   lastKissSenderId: string | null;
   photoExchanges: PhotoExchange[];
   devMode: boolean;
